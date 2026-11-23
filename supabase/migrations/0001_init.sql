@@ -3,6 +3,10 @@
 -- exclusively by the security-definer triggers below, so they can't be faked
 -- from the browser.
 
+-- Internal helpers live in a schema the public API doesn't expose.
+create schema if not exists private;
+grant usage on schema private to authenticated;
+
 -- ------------------------------------------------------------------ characters
 create table public.characters (
   id uuid primary key references auth.users (id) on delete cascade,
@@ -34,12 +38,12 @@ revoke insert, update on public.characters from anon, authenticated;
 grant insert (id, name, gender, looking_for, age, bio, appearance) on public.characters to authenticated;
 grant update (name, looking_for, bio, appearance) on public.characters to authenticated;
 
-create or replace function public.touch_updated_at() returns trigger language plpgsql as $$
+create or replace function public.touch_updated_at() returns trigger language plpgsql set search_path = public as $$
 begin
   new.updated_at := now();
   return new;
 end $$;
-create or replace function public.set_answered_at() returns trigger language plpgsql as $$
+create or replace function public.set_answered_at() returns trigger language plpgsql set search_path = public as $$
 begin
   if old.status = 'pending' and new.status <> 'pending' then
     new.answered_at := now();
@@ -51,7 +55,7 @@ create trigger characters_touch before update on public.characters
   for each row execute function public.touch_updated_at();
 
 -- Award helper (internal only).
-create or replace function public.award(p_id uuid, p_xp int, p_drinks int default 0, p_dates int default 0, p_nights int default 0)
+create or replace function private.award(p_id uuid, p_xp int, p_drinks int default 0, p_dates int default 0, p_nights int default 0)
 returns void language sql security definer set search_path = public as $$
   update public.characters
      set xp = xp + p_xp,
@@ -60,7 +64,7 @@ returns void language sql security definer set search_path = public as $$
          nights = nights + p_nights
    where id = p_id;
 $$;
-revoke all on function public.award(uuid, int, int, int, int) from public, anon, authenticated;
+revoke all on function private.award(uuid, int, int, int, int) from public, anon, authenticated;
 
 -- A night out counts at most once every 10 minutes (+10 XP).
 create or replace function public.check_in() returns void
@@ -96,11 +100,14 @@ create table public.reports (
 alter table public.reports enable row level security;
 create policy "file reports" on public.reports for insert to authenticated with check (reporter_id = auth.uid());
 
-create or replace function public.is_blocked(a uuid, b uuid) returns boolean
+create or replace function private.is_blocked(a uuid, b uuid) returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.blocks
                   where (blocker_id = a and blocked_id = b) or (blocker_id = b and blocked_id = a));
 $$;
+
+revoke all on function private.is_blocked(uuid, uuid) from public, anon;
+grant execute on function private.is_blocked(uuid, uuid) to authenticated;
 
 -- ------------------------------------------------------------------ drinks
 create table public.drink_offers (
@@ -120,7 +127,7 @@ alter table public.drink_offers enable row level security;
 create policy "see my offers" on public.drink_offers for select to authenticated
   using (auth.uid() in (from_id, to_id));
 create policy "send offers" on public.drink_offers for insert to authenticated
-  with check (from_id = auth.uid() and status = 'pending' and not public.is_blocked(from_id, to_id));
+  with check (from_id = auth.uid() and status = 'pending' and not private.is_blocked(from_id, to_id));
 create policy "answer offers sent to me" on public.drink_offers for update to authenticated
   using (to_id = auth.uid() and status = 'pending')
   with check (to_id = auth.uid() and status in ('accepted', 'declined'));
@@ -147,10 +154,10 @@ create or replace function public.drink_offer_after() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
   if tg_op = 'INSERT' then
-    perform public.award(new.from_id, 5);
+    perform private.award(new.from_id, 5);
   elsif old.status = 'pending' and new.status = 'accepted' then
-    perform public.award(new.from_id, 20, 1);
-    perform public.award(new.to_id, 20, 1);
+    perform private.award(new.from_id, 20, 1);
+    perform private.award(new.to_id, 20, 1);
   end if;
   return null;
 end $$;
@@ -175,7 +182,7 @@ create index on public.date_invites (from_id);
 create index on public.date_invites (to_id);
 alter table public.date_invites enable row level security;
 
-create or replace function public.shared_drink_recently(a uuid, b uuid) returns boolean
+create or replace function private.shared_drink_recently(a uuid, b uuid) returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.drink_offers
                   where status = 'accepted'
@@ -183,12 +190,15 @@ language sql stable security definer set search_path = public as $$
                     and ((from_id = a and to_id = b) or (from_id = b and to_id = a)));
 $$;
 
+revoke all on function private.shared_drink_recently(uuid, uuid) from public, anon;
+grant execute on function private.shared_drink_recently(uuid, uuid) to authenticated;
+
 create policy "see my invites" on public.date_invites for select to authenticated
   using (auth.uid() in (from_id, to_id));
 create policy "invite someone you shared a drink with" on public.date_invites for insert to authenticated
   with check (from_id = auth.uid() and status = 'pending'
-              and public.shared_drink_recently(from_id, to_id)
-              and not public.is_blocked(from_id, to_id));
+              and private.shared_drink_recently(from_id, to_id)
+              and not private.is_blocked(from_id, to_id));
 create policy "answer invites sent to me" on public.date_invites for update to authenticated
   using (to_id = auth.uid() and status = 'pending')
   with check (to_id = auth.uid() and status in ('accepted', 'declined'));
@@ -201,8 +211,8 @@ create or replace function public.date_invite_after() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
   if old.status = 'pending' and new.status = 'accepted' then
-    perform public.award(new.from_id, 50, 0, 1);
-    perform public.award(new.to_id, 50, 0, 1);
+    perform private.award(new.from_id, 50, 0, 1);
+    perform private.award(new.to_id, 50, 0, 1);
   end if;
   return null;
 end $$;
@@ -223,23 +233,29 @@ create table public.messages (
 create index on public.messages (invite_id, id);
 alter table public.messages enable row level security;
 
-create or replace function public.in_date(p_invite uuid) returns boolean
+create or replace function private.in_date(p_invite uuid) returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.date_invites i
                   where i.id = p_invite and i.status = 'accepted'
                     and auth.uid() in (i.from_id, i.to_id)
-                    and not public.is_blocked(i.from_id, i.to_id));
+                    and not private.is_blocked(i.from_id, i.to_id));
 $$;
 
+revoke all on function private.in_date(uuid) from public, anon;
+grant execute on function private.in_date(uuid) to authenticated;
+
 create policy "read messages of my dates" on public.messages for select to authenticated
-  using (public.in_date(invite_id));
+  using (private.in_date(invite_id));
 create policy "write messages on my dates" on public.messages for insert to authenticated
-  with check (sender_id = auth.uid() and public.in_date(invite_id));
+  with check (sender_id = auth.uid() and private.in_date(invite_id));
 
 revoke insert, update on public.messages from anon, authenticated;
 grant insert (invite_id, sender_id, body) on public.messages to authenticated;
 
 alter publication supabase_realtime add table public.messages;
+
+revoke all on function public.touch_updated_at(), public.set_answered_at(), public.drink_offer_before_insert(),
+  public.drink_offer_after(), public.date_invite_after() from public, anon, authenticated;
 
 -- ------------------------------------------------------------------ realtime bar rooms
 -- The bar uses private Realtime channels named "bar:<room>"; only signed-in
