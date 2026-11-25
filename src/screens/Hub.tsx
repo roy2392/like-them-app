@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { backend } from '../backend';
+import { AdminPanel } from '../components/AdminPanel';
 import { Avatar } from '../components/Avatar';
 import { venueById } from '../game/catalog';
 import { formatRemaining, nightClock } from '../game/night';
@@ -18,6 +19,7 @@ export function Hub({ character, onEnterBar, onWardrobe, onOpenDate, onCharacter
   const [invites, setInvites] = useState<DateInvite[]>([]);
   const [people, setPeople] = useState<Map<string, Character>>(new Map());
   const [clock, setClock] = useState(nightClock());
+  const [admin, setAdmin] = useState(false);
   const prog = levelProgress(character.xp);
   const badges = badgesFor(character);
 
@@ -30,6 +32,14 @@ export function Hub({ character, onEnterBar, onWardrobe, onOpenDate, onCharacter
     const me = await backend.getMyCharacter();
     if (me && me.xp !== character.xp) onCharacter(me);
   }, [character.id, character.xp, onCharacter]);
+
+  useEffect(() => {
+    let alive = true;
+    backend.isAdmin().then((a) => alive && setAdmin(a));
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     void load();
@@ -108,6 +118,8 @@ export function Hub({ character, onEnterBar, onWardrobe, onOpenDate, onCharacter
               Enter the bar 🍸
             </button>
           </div>
+
+          {admin && <AdminPanel />}
 
           {incoming.length > 0 && (
             <div className="panel glass">

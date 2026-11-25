@@ -15,7 +15,7 @@ import type {
   DrinkOffer,
   PlayerState,
 } from '../types';
-import type { Backend, RoomConnection, Session } from './types';
+import type { AdminOverview, AdminReport, Backend, RoomConnection, Session } from './types';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Row = Record<string, any>;
@@ -174,6 +174,17 @@ export function createSupabaseBackend(url: string, anonKey: string): Backend {
     async report(userId, reason) {
       const id = await me();
       check(await sb.from('reports').insert({ reporter_id: id, reported_id: userId, reason }));
+    },
+
+    async isAdmin() {
+      const { data, error } = await sb.rpc('am_i_admin');
+      return !error && data === true;
+    },
+    async adminOverview() {
+      return check<AdminOverview>(await sb.rpc('admin_overview'));
+    },
+    async adminReports() {
+      return check<AdminReport[]>(await sb.rpc('admin_reports'));
     },
 
     joinRoom(roomId, meState, h): RoomConnection {

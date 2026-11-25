@@ -36,6 +36,8 @@ What Supabase provides:
 - **Postgres with row-level security:** characters, drink offers, date invites, messages, blocks and reports. Players can only edit their own profile fields. **XP and stats are awarded only by database triggers**, so they can't be faked from the browser. Offers are rate-limited.
 - **Realtime:** private presence and broadcast channels for the bar (only signed-in players can join), plus live updates for date chats.
 
+**Admins.** An admin account sees an extra panel on its home screen with player, drink and date counts and every moderation report. To make an existing account an admin, run this in the Supabase SQL editor: `insert into private.admins (user_id) select id from auth.users where email = '<their email>';`
+
 `VITE_NIGHT_MINUTES` sets how long one night at the bar lasts in real time (default 20).
 
 ## Code map

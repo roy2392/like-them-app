@@ -14,6 +14,24 @@ export interface Session {
   email: string;
 }
 
+export interface AdminOverview {
+  players: number;
+  women: number;
+  men: number;
+  drinks_accepted: number;
+  dates: number;
+  reports: number;
+}
+
+export interface AdminReport {
+  id: number;
+  created_at: string;
+  reason: string;
+  reporter_name: string | null;
+  reported_id: string;
+  reported_name: string | null;
+}
+
 export interface RoomHandlers {
   /** Full list of players currently present (excluding self). */
   onPlayers(players: PlayerState[]): void;
@@ -69,6 +87,10 @@ export interface Backend {
   listBlocked(): Promise<string[]>;
   block(userId: string): Promise<void>;
   report(userId: string, reason: string): Promise<void>;
+
+  isAdmin(): Promise<boolean>;
+  adminOverview(): Promise<AdminOverview>;
+  adminReports(): Promise<AdminReport[]>;
 
   joinRoom(roomId: string, me: PlayerState, handlers: RoomHandlers): RoomConnection;
 }

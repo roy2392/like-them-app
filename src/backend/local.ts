@@ -418,6 +418,17 @@ export function createLocalBackend(): Backend {
       mutate((db) => db.reports.push({ reporter: mine, reported: userId, reason, at: nowIso() }));
     },
 
+    // Demo mode has no admins; moderation needs the real (Supabase) backend.
+    async isAdmin() {
+      return false;
+    },
+    async adminOverview() {
+      throw new Error('Admins only');
+    },
+    async adminReports() {
+      return [];
+    },
+
     joinRoom(roomId, meState, h): RoomConnection {
       const ch = new BroadcastChannel('likethem-room-' + roomId);
       const peers = new Map<string, { state: PlayerState; seen: number }>();
