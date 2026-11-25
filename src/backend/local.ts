@@ -29,12 +29,51 @@ interface Db {
   checkins: Record<string, number>;
 }
 
+/** Storage that falls back to memory when the browser blocks it (private mode, sandboxed frames). */
+function safeStorage(get: () => Storage): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> {
+  const mem = new Map<string, string>();
+  const real = () => {
+    try {
+      return get();
+    } catch {
+      return null;
+    }
+  };
+  return {
+    getItem: (k) => {
+      try {
+        return real()?.getItem(k) ?? mem.get(k) ?? null;
+      } catch {
+        return mem.get(k) ?? null;
+      }
+    },
+    setItem: (k, v) => {
+      mem.set(k, v);
+      try {
+        real()?.setItem(k, v);
+      } catch {
+        /* memory only */
+      }
+    },
+    removeItem: (k) => {
+      mem.delete(k);
+      try {
+        real()?.removeItem(k);
+      } catch {
+        /* memory only */
+      }
+    },
+  };
+}
+const local = safeStorage(() => localStorage);
+const sessionStore = safeStorage(() => sessionStorage);
+
 const DB_KEY = 'likethem-demo-db-v1';
 const SESSION_KEY = 'likethem-demo-session';
 
 function load(): Db {
   try {
-    const raw = localStorage.getItem(DB_KEY);
+    const raw = local.getItem(DB_KEY);
     if (raw) return JSON.parse(raw) as Db;
   } catch {
     /* fall through */
@@ -42,7 +81,7 @@ function load(): Db {
   return { users: {}, characters: {}, offers: [], invites: [], messages: [], blocks: {}, reports: [], checkins: {} };
 }
 function save(db: Db) {
-  localStorage.setItem(DB_KEY, JSON.stringify(db));
+  local.setItem(DB_KEY, JSON.stringify(db));
 }
 function mutate<T>(fn: (db: Db) => T): T {
   const db = load();
@@ -162,7 +201,7 @@ export function createLocalBackend(): Backend {
   };
 
   const session = (): Session | null => {
-    const raw = sessionStorage.getItem(SESSION_KEY);
+    const raw = sessionStore.getItem(SESSION_KEY);
     return raw ? (JSON.parse(raw) as Session) : null;
   };
   const me = (): Session => {
@@ -171,8 +210,8 @@ export function createLocalBackend(): Backend {
     return s;
   };
   const setSession = (s: Session | null) => {
-    if (s) sessionStorage.setItem(SESSION_KEY, JSON.stringify(s));
-    else sessionStorage.removeItem(SESSION_KEY);
+    if (s) sessionStore.setItem(SESSION_KEY, JSON.stringify(s));
+    else sessionStore.removeItem(SESSION_KEY);
     authListeners.forEach((cb) => cb(s));
   };
 
